@@ -1,67 +1,7 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Powerlifting Warmup Timer with Firebase</title>
-  <style>
-    /* Minimal styling to keep it readable */
-    body {
-      font-family: system-ui, sans-serif;
-      background: #1a202c;
-      color: white;
-      padding: 1rem;
-      max-width: 700px;
-      margin: auto;
-    }
-    input, select, button {
-      font-size: 1rem;
-      padding: 0.5rem;
-      border-radius: 4px;
-      border: none;
-      margin-bottom: 1rem;
-    }
-    input, select {
-      width: 100%;
-      background: #2d3748;
-      color: white;
-      border: 1px solid #4a5568;
-    }
-    button {
-      background: #48bb78;
-      color: #1a202c;
-      cursor: pointer;
-      font-weight: 600;
-    }
-    button:disabled {
-      background: #718096;
-      cursor: not-allowed;
-    }
-    .warmup {
-      background: #2d3748;
-      padding: 1rem;
-      margin-bottom: 1rem;
-      border-radius: 6px;
-      cursor: grab;
-    }
-    .dragging {
-      opacity: 0.5;
-    }
-  </style>
-</head>
-<body>
-
-<h1>Powerlifting Warmup Timer</h1>
-
-<div id="app">
-  <!-- The app UI will be rendered here -->
-</div>
-
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-app.js";
   import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-database.js";
 
-  // Your Firebase config
   const firebaseConfig = {
     apiKey: "AIzaSyAm9CzwFSHMmUQ7EUhp38OsnlUlLwXu75Q",
     authDomain: "powerliftingwarmuptimer.firebaseapp.com",
@@ -73,17 +13,14 @@
     measurementId: "G-DHVVDB1SC5"
   };
 
-  // Initialize Firebase
   const app = initializeApp(firebaseConfig);
   const db = getDatabase(app);
 
-  // Utility to get URL param ?view=...
   function getViewSessionId() {
     const params = new URLSearchParams(window.location.search);
     return params.get("view");
   }
 
-  // Timer state variables
   let flightStartTime = "";
   let liftersBeforeYou = 5;
   let openerWeight = "";
@@ -97,14 +34,12 @@
   let sessionId = "";
   const appDiv = document.getElementById("app");
 
-  // Helpers for time formatting
   function formatTime(date) {
     if (!date) return "--:--";
     const hour12 = timeFormat === "12h";
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12 });
   }
 
-  // Calculate target times for warmups
   function calculateTargetTimes(warmupsToCalc) {
     if (!flightStartTime || warmupsToCalc.length === 0) return warmupsToCalc;
     const [hours, minutes] = flightStartTime.split(":").map(Number);
@@ -121,12 +56,10 @@
     return result;
   }
 
-  // Generate a random session ID
   function generateSessionId() {
     return Math.random().toString(36).slice(2, 10);
   }
 
-  // Save current timer state to Firebase
   function saveSession() {
     if (!sessionId) return;
     const sessionRef = ref(db, "sessions/" + sessionId);
@@ -150,7 +83,6 @@
     set(sessionRef, saveData);
   }
 
-  // Load session from Firebase and subscribe to realtime updates
   function loadSession(sessionToLoad) {
     sessionId = sessionToLoad;
     const sessionRef = ref(db, "sessions/" + sessionId);
@@ -177,7 +109,6 @@
     });
   }
 
-  // Initialize warmups array with empty warmups
   function initWarmups(n) {
     warmups = [];
     for (let i = 0; i < n; i++) {
@@ -192,17 +123,20 @@
     }
   }
 
-  // Render the app UI
   function renderApp() {
-    // If running, show active timer UI, else setup UI
+    if (timerInterval) clearInterval(timerInterval); // Clear any existing interval
+
     if (isRunning) {
       renderTimer();
+      // Start interval to update UI every second for everyone (including viewers)
+      timerInterval = setInterval(() => {
+        renderTimer();
+      }, 1000);
     } else {
       renderSetup();
     }
   }
 
-  // Render setup UI
   function renderSetup() {
     appDiv.innerHTML = `
       <label>Flight Start Time:<br/>
@@ -236,13 +170,10 @@
       <button id="newSessionBtn">New Session</button>
     `;
 
-    // Setup warmups inputs
     renderWarmupsInputs();
 
-    // Enable start button only if flightStartTime and openerWeight are set
     document.getElementById("startBtn").disabled = !(flightStartTime && openerWeight.trim());
 
-    // Add event listeners
     document.getElementById("flightStart").addEventListener("change", e => {
       flightStartTime = e.target.value;
       saveSession();
@@ -300,7 +231,6 @@
     });
   }
 
-  // Render warmups input fields
   function renderWarmupsInputs() {
     const container = document.getElementById("warmupsContainer");
     container.innerHTML = "";
@@ -323,7 +253,6 @@
         </label>
       `;
 
-      // Update warmups array on input change
       div.querySelector(".weight").addEventListener("input", e => {
         warmups[i].weight = e.target.value;
         saveSession();
@@ -337,7 +266,6 @@
         saveSession();
       });
 
-      // Drag and drop handlers for reorder
       div.addEventListener("dragstart", e => {
         e.dataTransfer.setData("text/plain", i);
         div.classList.add("dragging");
@@ -352,18 +280,16 @@
         const fromIndex = Number(draggingEl.dataset.index);
         const toIndex = Number(div.dataset.index);
         if (fromIndex === toIndex) return;
-        // reorder warmups array
         const moved = warmups.splice(fromIndex, 1)[0];
         warmups.splice(toIndex, 0, moved);
         saveSession();
-        renderApp(); // re-render to update order
+        renderApp();
       });
 
       container.appendChild(div);
     });
   }
 
-  // Start timer: calculate activeWarmups and begin countdown
   function startTimer() {
     const filledWarmups = warmups.filter(w => w.weight.trim() !== "");
     activeWarmups = calculateTargetTimes(filledWarmups);
@@ -372,98 +298,11 @@
     saveSession();
     renderApp();
 
-    if (timerInterval) clearInterval(timerInterval);
-    timerInterval = setInterval(() => {
-      renderApp();
-    }, 1000);
+    // timerInterval is set in renderApp() for both owner and viewers
   }
 
-  // Complete current warmup and move to next
   function completeWarmup() {
     if (!isRunning) return;
     activeWarmups[currentWarmupIndex].completed = true;
     activeWarmups[currentWarmupIndex].actualTime = new Date();
-    currentWarmupIndex++;
-    if (currentWarmupIndex >= activeWarmups.length) {
-      // Timer finished
-      isRunning = false;
-      clearInterval(timerInterval);
-    }
-    saveSession();
-    renderApp();
-  }
-
-  // Render timer UI while running
-  function renderTimer() {
-    const warmupDivs = activeWarmups.map((w, i) => {
-      const targetTime = w.targetTime;
-      const now = new Date();
-      const diff = targetTime ? targetTime.getTime() - now.getTime() : null;
-      const minutes = diff !== null ? Math.floor(Math.abs(diff) / 60000) : "--";
-      const seconds = diff !== null ? Math.floor((Math.abs(diff) % 60000) / 1000) : "--";
-      const isLate = diff !== null && diff < 0;
-      const isCurrent = i === currentWarmupIndex;
-
-      return `
-        <div style="
-          background: ${w.completed ? "#2f855a" : isCurrent ? "#3182ce" : "#4a5568"};
-          padding: 1rem;
-          margin-bottom: 1rem;
-          border-radius: 6px;
-          color: white;
-        ">
-          <strong>Warmup ${i+1}:</strong> ${w.weight} x ${w.reps}<br/>
-          ${w.minutesBefore} min before ${i === activeWarmups.length - 1 ? "opener" : "next warmup"}<br/>
-          Target time: ${formatTime(targetTime)}<br/>
-          ${w.completed ? "Completed at: " + formatTime(w.actualTime) : ""}
-          ${isCurrent && !w.completed ? `
-            <div style="margin-top: 0.5rem;">
-              <button id="completeBtn">Complete Warmup</button>
-              <div style="font-size: 2rem; color: ${isLate ? "red" : "green"}; margin-top: 0.5rem;">
-                ${isLate ? "-" : ""}${String(minutes).padStart(2,"0")}:${String(seconds).padStart(2,"0")} ${isLate ? "overdue" : "until target"}
-              </div>
-            </div>
-          ` : ""}
-        </div>
-      `;
-    }).join("");
-
-    appDiv.innerHTML = `
-      <h2>Timer Running</h2>
-      ${warmupDivs}
-      <div>
-        <strong>Opener:</strong> ${openerWeight}
-      </div>
-      <button id="editBtn">Edit Timer</button>
-    `;
-
-    document.getElementById("completeBtn")?.addEventListener("click", completeWarmup);
-    document.getElementById("editBtn").addEventListener("click", () => {
-      isRunning = false;
-      saveSession();
-      renderApp();
-      clearInterval(timerInterval);
-    });
-  }
-
-  // Initialize or load session on page load
-  function init() {
-    const viewId = getViewSessionId();
-    if (viewId) {
-      sessionId = viewId;
-      loadSession(sessionId);
-    } else {
-      sessionId = generateSessionId();
-      initWarmups(numWarmups);
-      saveSession();
-      renderApp();
-      window.history.replaceState(null, "", location.pathname + "?view=" + sessionId);
-    }
-  }
-
-  // Start the app
-  init();
-</script>
-
-</body>
-</html>
+    curren
