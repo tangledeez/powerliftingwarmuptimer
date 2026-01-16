@@ -1,308 +1,331 @@
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-app.js";
-  import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-database.js";
-
-  const firebaseConfig = {
-    apiKey: "AIzaSyAm9CzwFSHMmUQ7EUhp38OsnlUlLwXu75Q",
-    authDomain: "powerliftingwarmuptimer.firebaseapp.com",
-    databaseURL: "https://powerliftingwarmuptimer-default-rtdb.firebaseio.com/",
-    projectId: "powerliftingwarmuptimer",
-    storageBucket: "powerliftingwarmuptimer.firebasestorage.app",
-    messagingSenderId: "209334487029",
-    appId: "1:209334487029:web:8ffb1d4dd6c649e46f42bc",
-    measurementId: "G-DHVVDB1SC5"
-  };
-
-  const app = initializeApp(firebaseConfig);
-  const db = getDatabase(app);
-
-  function getViewSessionId() {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("view");
-  }
-
-  let flightStartTime = "";
-  let liftersBeforeYou = 5;
-  let openerWeight = "";
-  let timeFormat = "24h";
-  let numWarmups = 3;
-  let warmups = [];
-  let isRunning = false;
-  let activeWarmups = [];
-  let currentWarmupIndex = 0;
-  let timerInterval = null;
-  let sessionId = "";
-  const appDiv = document.getElementById("app");
-
-  function formatTime(date) {
-    if (!date) return "--:--";
-    const hour12 = timeFormat === "12h";
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12 });
-  }
-
-  function calculateTargetTimes(warmupsToCalc) {
-    if (!flightStartTime || warmupsToCalc.length === 0) return warmupsToCalc;
-    const [hours, minutes] = flightStartTime.split(":").map(Number);
-    const flightStart = new Date();
-    flightStart.setHours(hours, minutes, 0, 0);
-    const openerTime = new Date(flightStart.getTime() + liftersBeforeYou * 60000);
-    const result = [...warmupsToCalc];
-    let nextTime = openerTime;
-    for (let i = result.length - 1; i >= 0; i--) {
-      const targetTime = new Date(nextTime.getTime() - result[i].minutesBefore * 60000);
-      result[i].targetTime = targetTime;
-      nextTime = targetTime;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Powerlifting Warmup Timer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      background: #1a202c;
+      color: white;
+      font-family: Arial, sans-serif;
+      padding: 1rem;
+      max-width: 600px;
+      margin: auto;
     }
-    return result;
-  }
+    input, select, button {
+      margin: 0.5rem 0;
+      padding: 0.5rem;
+      font-size: 1rem;
+      border-radius: 4px;
+      border: none;
+    }
+    input, select {
+      width: 100%;
+      box-sizing: border-box;
+      background: #2d3748;
+      color: white;
+    }
+    button {
+      cursor: pointer;
+      background: #48bb78;
+      color: white;
+      border: none;
+    }
+    button:disabled {
+      background: #718096;
+      cursor: not-allowed;
+    }
+    .warmup {
+      background: #2d3748;
+      padding: 0.5rem;
+      border-radius: 6px;
+      margin-bottom: 0.75rem;
+    }
+    .warmup > div {
+      margin-bottom: 0.25rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Powerlifting Warmup Timer</h1>
+  <div id="app">Loading...</div>
 
-  function generateSessionId() {
-    return Math.random().toString(36).slice(2, 10);
-  }
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-app.js";
+    import { getDatabase, ref, onValue, set, update } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-database.js";
 
-  function saveSession() {
-    if (!sessionId) return;
-    const sessionRef = ref(db, "sessions/" + sessionId);
-    const saveData = {
-      flightStartTime,
-      liftersBeforeYou,
-      openerWeight,
-      timeFormat,
-      numWarmups,
-      warmups,
-      isRunning,
-      activeWarmups: activeWarmups.map(w => ({
-        ...w,
-        targetTime: w.targetTime ? w.targetTime.getTime() : null,
-        actualTime: w.actualTime ? w.actualTime.getTime() : null,
-        completed: w.completed
-      })),
-      currentWarmupIndex,
-      updatedAt: Date.now()
+    // Your Firebase config
+    const firebaseConfig = {
+      apiKey: "AIzaSyAm9CzwFSHMmUQ7EUhp38OsnlUlLwXu75Q",
+      authDomain: "powerliftingwarmuptimer.firebaseapp.com",
+      databaseURL: "https://powerliftingwarmuptimer-default-rtdb.firebaseio.com/",
+      projectId: "powerliftingwarmuptimer",
+      storageBucket: "powerliftingwarmuptimer.firebasestorage.app",
+      messagingSenderId: "209334487029",
+      appId: "1:209334487029:web:8ffb1d4dd6c649e46f42bc",
+      measurementId: "G-DHVVDB1SC5"
     };
-    set(sessionRef, saveData);
-  }
 
-  function loadSession(sessionToLoad) {
-    sessionId = sessionToLoad;
-    const sessionRef = ref(db, "sessions/" + sessionId);
-    onValue(sessionRef, (snapshot) => {
-      const data = snapshot.val();
-      if (!data) return;
+    // Initialize Firebase and database
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
 
-      flightStartTime = data.flightStartTime || "";
-      liftersBeforeYou = data.liftersBeforeYou || 5;
-      openerWeight = data.openerWeight || "";
-      timeFormat = data.timeFormat || "24h";
-      numWarmups = data.numWarmups || 3;
-      warmups = data.warmups || [];
-      isRunning = data.isRunning || false;
-      currentWarmupIndex = data.currentWarmupIndex || 0;
+    // DOM references
+    const appDiv = document.getElementById("app");
 
-      activeWarmups = (data.activeWarmups || []).map(w => ({
-        ...w,
-        targetTime: w.targetTime ? new Date(w.targetTime) : null,
-        actualTime: w.actualTime ? new Date(w.actualTime) : null,
-      }));
-
-      renderApp();
-    });
-  }
-
-  function initWarmups(n) {
-    warmups = [];
-    for (let i = 0; i < n; i++) {
-      warmups.push({
-        weight: "",
-        reps: 1,
-        minutesBefore: 5,
-        completed: false,
-        targetTime: null,
-        actualTime: null
-      });
+    // Utility to get URL params
+    function getParam(name) {
+      const url = new URL(window.location.href);
+      return url.searchParams.get(name);
     }
-  }
 
-  function renderApp() {
-    if (timerInterval) clearInterval(timerInterval); // Clear any existing interval
+    // Session ID from URL for sharing/view-only mode
+    const sessionId = getParam("session") || null;
+    const isViewOnly = sessionId !== null;
 
-    if (isRunning) {
-      renderTimer();
-      // Start interval to update UI every second for everyone (including viewers)
-      timerInterval = setInterval(() => {
-        renderTimer();
-      }, 1000);
-    } else {
-      renderSetup();
+    // Default timer data
+    let state = {
+      flightStartTime: '',
+      liftersBeforeYou: 5,
+      totalLifters: 12,
+      openerWeight: '',
+      numWarmups: 3,
+      timeFormat: '24h',
+      warmups: [
+        { weight: '', reps: 1, minutesBefore: 5, completed: false, actualTime: null },
+        { weight: '', reps: 1, minutesBefore: 5, completed: false, actualTime: null },
+        { weight: '', reps: 1, minutesBefore: 5, completed: false, actualTime: null },
+      ],
+      isRunning: false,
+      currentWarmupIndex: 0,
+      currentTime: Date.now()
+    };
+
+    // Update state in Firebase
+    function saveState() {
+      if (!sessionId) return;
+      set(ref(db, 'sessions/' + sessionId), state).catch(console.error);
     }
-  }
 
-  function renderSetup() {
-    appDiv.innerHTML = `
-      <label>Flight Start Time:<br/>
-        <input type="time" id="flightStart" value="${flightStartTime}" />
-      </label><br/>
-
-      <label>Lifters Before You:<br/>
-        <input type="number" id="liftersBeforeYou" min="0" value="${liftersBeforeYou}" />
-      </label><br/>
-
-      <label>Opener Weight:<br/>
-        <input type="text" id="openerWeight" value="${openerWeight}" placeholder="e.g. 180kg" />
-      </label><br/>
-
-      <label>Time Format:<br/>
-        <select id="timeFormat">
-          <option value="24h" ${timeFormat === "24h" ? "selected" : ""}>24-hour</option>
-          <option value="12h" ${timeFormat === "12h" ? "selected" : ""}>12-hour</option>
-        </select>
-      </label><br/>
-
-      <label>Number of Warmups:<br/>
-        <select id="numWarmups">
-          ${[1,2,3,4,5,6,7,8].map(n => `<option value="${n}" ${n === numWarmups ? "selected" : ""}>${n}</option>`).join("")}
-        </select>
-      </label><br/>
-
-      <div id="warmupsContainer"></div>
-
-      <button id="startBtn" disabled>Start Timer</button>
-      <button id="newSessionBtn">New Session</button>
-    `;
-
-    renderWarmupsInputs();
-
-    document.getElementById("startBtn").disabled = !(flightStartTime && openerWeight.trim());
-
-    document.getElementById("flightStart").addEventListener("change", e => {
-      flightStartTime = e.target.value;
-      saveSession();
-      renderApp();
-    });
-    document.getElementById("liftersBeforeYou").addEventListener("change", e => {
-      liftersBeforeYou = Number(e.target.value);
-      saveSession();
-      renderApp();
-    });
-    document.getElementById("openerWeight").addEventListener("input", e => {
-      openerWeight = e.target.value;
-      saveSession();
-      renderApp();
-    });
-    document.getElementById("timeFormat").addEventListener("change", e => {
-      timeFormat = e.target.value;
-      saveSession();
-      renderApp();
-    });
-    document.getElementById("numWarmups").addEventListener("change", e => {
-      const newNum = Number(e.target.value);
-      if (newNum > warmups.length) {
-        for(let i=warmups.length; i<newNum; i++) {
-          warmups.push({
-            weight: "",
-            reps: 1,
-            minutesBefore: 5,
-            completed: false,
-            targetTime: null,
-            actualTime: null
-          });
+    // Listen for realtime updates
+    if (sessionId) {
+      const sessionRef = ref(db, 'sessions/' + sessionId);
+      onValue(sessionRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+          state = data;
+          render();
         }
-      } else {
-        warmups.splice(newNum);
+      });
+    }
+
+    // Generate a random session ID (simple)
+    function generateSessionId() {
+      return Math.random().toString(36).substring(2, 10);
+    }
+
+    // Calculate opener time from flightStartTime + liftersBeforeYou
+    function getOpenerTime() {
+      if (!state.flightStartTime) return null;
+      const [h, m] = state.flightStartTime.split(':').map(Number);
+      const flightStart = new Date();
+      flightStart.setHours(h, m, 0, 0);
+      return new Date(flightStart.getTime() + state.liftersBeforeYou * 60000);
+    }
+
+    // Calculate warmup target times backward from opener
+    function calculateTargetTimes() {
+      if (!state.flightStartTime || state.warmups.length === 0) return;
+      let nextTime = getOpenerTime();
+      for (let i = state.warmups.length - 1; i >= 0; i--) {
+        let w = state.warmups[i];
+        w.targetTime = new Date(nextTime.getTime() - w.minutesBefore * 60000);
+        nextTime = w.targetTime;
       }
-      numWarmups = newNum;
-      saveSession();
-      renderApp();
-    });
+    }
 
-    document.getElementById("startBtn").addEventListener("click", () => {
-      startTimer();
-    });
+    // Format time string
+    function formatTime(date) {
+      if (!date) return '--:--';
+      const options = { hour: '2-digit', minute: '2-digit', hour12: state.timeFormat === '12h' };
+      return date.toLocaleTimeString([], options);
+    }
 
-    document.getElementById("newSessionBtn").addEventListener("click", () => {
-      sessionId = generateSessionId();
-      isRunning = false;
-      activeWarmups = [];
-      currentWarmupIndex = 0;
-      initWarmups(numWarmups);
-      saveSession();
-      renderApp();
-      window.history.replaceState(null, "", location.pathname + "?view=" + sessionId);
-    });
-  }
+    // Update current time every second
+    setInterval(() => {
+      state.currentTime = Date.now();
+      render();
+    }, 1000);
 
-  function renderWarmupsInputs() {
-    const container = document.getElementById("warmupsContainer");
-    container.innerHTML = "";
+    // Render UI
+    function render() {
+      calculateTargetTimes();
 
-    warmups.forEach((w, i) => {
-      const div = document.createElement("div");
-      div.className = "warmup";
-      div.draggable = true;
-      div.dataset.index = i;
+      appDiv.innerHTML = '';
 
-      div.innerHTML = `
-        <label>Weight:
-          <input type="text" class="weight" value="${w.weight}" placeholder="e.g. 135kg" />
-        </label><br/>
-        <label>Reps:
-          <input type="number" class="reps" min="1" max="10" value="${w.reps}" />
-        </label><br/>
-        <label>Minutes Before:
-          <input type="number" class="minutesBefore" min="1" max="60" value="${w.minutesBefore}" />
-        </label>
-      `;
+      // Share link if no session
+      if (!sessionId) {
+        const startSessionBtn = document.createElement('button');
+        startSessionBtn.textContent = 'Start New Shared Timer';
+        startSessionBtn.onclick = () => {
+          const newId = generateSessionId();
+          window.history.replaceState(null, null, `?session=${newId}`);
+          state.isRunning = false;
+          state.currentWarmupIndex = 0;
+          saveState();
+          render();
+        };
+        appDiv.appendChild(startSessionBtn);
+        appDiv.appendChild(document.createElement('hr'));
+      }
 
-      div.querySelector(".weight").addEventListener("input", e => {
-        warmups[i].weight = e.target.value;
-        saveSession();
+      // Form fields (disabled if view only)
+      const createInput = (labelText, value, onChange, type = "text", disabled = false) => {
+        const wrapper = document.createElement('div');
+        const label = document.createElement('label');
+        label.textContent = labelText;
+        const input = document.createElement('input');
+        input.type = type;
+        input.value = value;
+        input.disabled = disabled;
+        input.oninput = e => {
+          onChange(e.target.value);
+          if (sessionId) saveState();
+        };
+        wrapper.appendChild(label);
+        wrapper.appendChild(input);
+        return wrapper;
+      };
+
+      // Time Format select
+      const createSelect = (labelText, value, options, onChange, disabled = false) => {
+        const wrapper = document.createElement('div');
+        const label = document.createElement('label');
+        label.textContent = labelText;
+        const select = document.createElement('select');
+        select.disabled = disabled;
+        options.forEach(opt => {
+          const option = document.createElement('option');
+          option.value = opt.value;
+          option.textContent = opt.label;
+          if (opt.value === value) option.selected = true;
+          select.appendChild(option);
+        });
+        select.onchange = e => {
+          onChange(e.target.value);
+          if (sessionId) saveState();
+        };
+        wrapper.appendChild(label);
+        wrapper.appendChild(select);
+        return wrapper;
+      };
+
+      appDiv.appendChild(createInput('Flight Start Time (HH:MM)', state.flightStartTime, v => state.flightStartTime = v, 'time', isViewOnly));
+      appDiv.appendChild(createInput('Lifters Before You', state.liftersBeforeYou, v => state.liftersBeforeYou = Number(v), 'number', isViewOnly));
+      appDiv.appendChild(createInput('Total Lifters in Flight', state.totalLifters || 12, v => state.totalLifters = Number(v), 'number', isViewOnly));
+      appDiv.appendChild(createSelect('Time Format', state.timeFormat, [
+        { value: '24h', label: '24-hour (14:30)' },
+        { value: '12h', label: '12-hour (2:30 PM)' }
+      ], v => state.timeFormat = v, isViewOnly));
+
+      // Warmups inputs
+      const warmupsDiv = document.createElement('div');
+      warmupsDiv.innerHTML = '<h3>Warmups</h3>';
+
+      state.warmups.forEach((w, i) => {
+        const warmupDiv = document.createElement('div');
+        warmupDiv.className = 'warmup';
+
+        // Weight
+        warmupDiv.appendChild(createInput(`Warmup ${i+1} Weight (kg)`, w.weight, v => {
+          state.warmups[i].weight = v;
+          if (sessionId) saveState();
+        }, 'text', isViewOnly));
+
+        // Reps
+        warmupDiv.appendChild(createInput(`Warmup ${i+1} Reps`, w.reps, v => {
+          state.warmups[i].reps = Number(v);
+          if (sessionId) saveState();
+        }, 'number', isViewOnly));
+
+        // Minutes before
+        warmupDiv.appendChild(createInput(`Minutes Before Next Warmup`, w.minutesBefore, v => {
+          state.warmups[i].minutesBefore = Number(v);
+          if (sessionId) saveState();
+        }, 'number', isViewOnly));
+
+        // Target Time display
+        const targetP = document.createElement('p');
+        targetP.textContent = 'Target Time: ' + formatTime(w.targetTime);
+        warmupDiv.appendChild(targetP);
+
+        // Completed checkbox if not view only
+        if (!isViewOnly) {
+          const completeBtn = document.createElement('button');
+          completeBtn.textContent = w.completed ? 'Completed ✓' : 'Mark Completed';
+          completeBtn.disabled = w.completed || !state.isRunning;
+          completeBtn.onclick = () => {
+            if (!w.completed) {
+              state.warmups[i].completed = true;
+              state.warmups[i].actualTime = new Date().toISOString();
+              if (sessionId) saveState();
+              render();
+            }
+          };
+          warmupDiv.appendChild(completeBtn);
+        }
+
+        warmupsDiv.appendChild(warmupDiv);
       });
-      div.querySelector(".reps").addEventListener("input", e => {
-        warmups[i].reps = Number(e.target.value);
-        saveSession();
-      });
-      div.querySelector(".minutesBefore").addEventListener("input", e => {
-        warmups[i].minutesBefore = Number(e.target.value);
-        saveSession();
-      });
 
-      div.addEventListener("dragstart", e => {
-        e.dataTransfer.setData("text/plain", i);
-        div.classList.add("dragging");
-      });
-      div.addEventListener("dragend", e => {
-        div.classList.remove("dragging");
-      });
-      div.addEventListener("dragover", e => {
-        e.preventDefault();
-        const draggingEl = document.querySelector(".dragging");
-        if (!draggingEl) return;
-        const fromIndex = Number(draggingEl.dataset.index);
-        const toIndex = Number(div.dataset.index);
-        if (fromIndex === toIndex) return;
-        const moved = warmups.splice(fromIndex, 1)[0];
-        warmups.splice(toIndex, 0, moved);
-        saveSession();
-        renderApp();
-      });
+      appDiv.appendChild(warmupsDiv);
 
-      container.appendChild(div);
-    });
-  }
+      // Opener Weight
+      appDiv.appendChild(createInput('Opener Weight', state.openerWeight, v => {
+        state.openerWeight = v;
+        if (sessionId) saveState();
+      }, 'text', isViewOnly));
 
-  function startTimer() {
-    const filledWarmups = warmups.filter(w => w.weight.trim() !== "");
-    activeWarmups = calculateTargetTimes(filledWarmups);
-    currentWarmupIndex = 0;
-    isRunning = true;
-    saveSession();
-    renderApp();
+      // Start / Reset buttons
+      const btnDiv = document.createElement('div');
 
-    // timerInterval is set in renderApp() for both owner and viewers
-  }
+      const canStart = state.flightStartTime && state.openerWeight && state.warmups.some(w => w.weight.trim() !== '');
+      const startBtn = document.createElement('button');
+      startBtn.textContent = state.isRunning ? 'Running...' : 'Start Timer';
+      startBtn.disabled = !canStart || state.isRunning || isViewOnly;
+      startBtn.onclick = () => {
+        state.isRunning = true;
+        state.currentWarmupIndex = 0;
+        if (sessionId) saveState();
+        render();
+      };
+      btnDiv.appendChild(startBtn);
 
-  function completeWarmup() {
-    if (!isRunning) return;
-    activeWarmups[currentWarmupIndex].completed = true;
-    activeWarmups[currentWarmupIndex].actualTime = new Date();
-    curren
+      const resetBtn = document.createElement('button');
+      resetBtn.textContent = 'Reset Timer';
+      resetBtn.onclick = () => {
+        state.isRunning = false;
+        state.currentWarmupIndex = 0;
+        state.warmups.forEach(w => { w.completed = false; w.actualTime = null; });
+        if (sessionId) saveState();
+        render();
+      };
+      btnDiv.appendChild(resetBtn);
+
+      appDiv.appendChild(btnDiv);
+
+      // Show share link if not view only
+      if (!sessionId) {
+        const linkP = document.createElement('p');
+        linkP.style.marginTop = '1rem';
+        const newSessionId = generateSessionId();
+        linkP.innerHTML = `Share this link to sync timer live:<br><input type="text" readonly style="width: 100%" value="${window.location.origin + window.location.pathname}?session=${newSessionId}">`;
+        appDiv.appendChild(linkP);
+      }
+    }
+
+    render();
+  </script>
+</body>
+</html>
